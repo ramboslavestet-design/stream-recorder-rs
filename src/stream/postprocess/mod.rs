@@ -37,72 +37,95 @@ pub async fn post_process_session(
         return Ok(());
     }
 
-    if session_files.len() == 1 {
+    let session_files: Vec<String> = session_files
+        .into_iter()
+        .filter(|f| {
+            if !Path::new(f).exists() {
+                eprintln!("Segment file missing, skipping: {}", f);
+                false
+            } else {
+                true
+            }
+        })
+        .collect();
+
+    if session_files.is_empty() {
+        return Ok(());
+    }
+
+    let pending = session_files.clone();
+    storage::add_pending(&pending);
+
+    let result = if session_files.len() == 1 {
         let file = session_files
             .into_iter()
             .next()
             .ok_or_else(|| anyhow::anyhow!("expected a single session file"))?;
-        return post_process_stream(stream_info, file).await;
-    }
+        post_process_stream(stream_info, file).await
+    } else {
+        println!(
+            "Combining {} stream segments for {}...",
+            session_files.len(),
+            stream_info.username
+        );
 
-    println!(
-        "Combining {} stream segments for {}...",
-        session_files.len(),
-        stream_info.username
-    );
+        match concat_video_files(&session_files).await {
+            Ok(combined_path) => {
+                println!(
+                    "Successfully combined stream segments into: {}",
+                    combined_path
+                );
 
-    match concat_video_files(&session_files).await {
-        Ok(combined_path) => {
-            println!(
-                "Successfully combined stream segments into: {}",
-                combined_path
-            );
-
-            for file in &session_files {
-                if let Err(error) = tokio::fs::remove_file(file).await {
-                    eprintln!("Failed to delete segment {}: {}", file, error);
+                for file in &session_files {
+                    if let Err(error) = tokio::fs::remove_file(file).await {
+                        eprintln!("Failed to delete segment {}: {}", file, error);
+                    }
                 }
+
+                post_process_stream(stream_info, combined_path).await
             }
+            Err(error) => {
+                eprintln!(
+                    "Failed to combine stream segments ({}), processing files individually...",
+                    error
+                );
 
-            post_process_stream(stream_info, combined_path).await
-        }
-        Err(error) => {
-            eprintln!(
-                "Failed to combine stream segments ({}), processing files individually...",
-                error
-            );
+                let config = Config::get();
+                send_program_error_webhook(
+                    config.get_discord_webhook_url(),
+                    "Failed to combine stream segments",
+                    &format!(
+                        "Recording for `{}` on platform `{}` produced {} segments that could not be combined into a single file.\nSegments will be processed individually.\n\n{}",
+                        stream_info.username,
+                        stream_info.platform.id,
+                        session_files.len(),
+                        error,
+                    ),
+                )
+                .await;
 
-            let config = Config::get();
-            send_program_error_webhook(
-                config.get_discord_webhook_url(),
-                "Failed to combine stream segments",
-                &format!(
-                    "Recording for `{}` on platform `{}` produced {} segments that could not be combined into a single file.\nSegments will be processed individually.\n\n{}",
-                    stream_info.username,
-                    stream_info.platform.id,
-                    session_files.len(),
-                    error,
-                ),
-            )
-            .await;
-
-            for file in session_files {
-                if let Err(post_process_error) =
-                    post_process_stream(stream_info.clone(), file).await
-                {
-                    eprintln!("Error post-processing segment: {}", post_process_error);
+                for file in session_files {
+                    if let Err(post_process_error) =
+                        post_process_stream(stream_info.clone(), file).await
+                    {
+                        eprintln!("Error post-processing segment: {}", post_process_error);
+                    }
                 }
-            }
 
-            Ok(())
+                Ok(())
+            }
         }
+    };
+
+    storage::remove_pending(&pending);
+    if let Err(error) = storage::manage_disk_space().await {
+        eprintln!("Error managing disk space: {}", error);
     }
+    result
 }
 
 async fn post_process_stream(stream_info: StreamInfo, output_path: String) -> StreamResult<()> {
     println!("Post-processing recorded stream: {}", output_path);
-
-    storage::manage_disk_space().await?;
 
     let (file_size, duration) = get_video_metadata(&output_path).await?;
     let config = Config::get();

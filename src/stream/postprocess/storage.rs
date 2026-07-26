@@ -5,8 +5,39 @@ use crate::types::{DurationValue, FileSize as FileSizeValue};
 use fs2::available_space;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, SystemTime};
 use walkdir::WalkDir;
+
+static PENDING_SEGMENTS: LazyLock<Mutex<HashSet<PathBuf>>> =
+    LazyLock::new(|| Mutex::new(HashSet::new()));
+
+fn lock_pending() -> std::sync::MutexGuard<'static, HashSet<PathBuf>> {
+    PENDING_SEGMENTS.lock().unwrap_or_else(|poison| {
+        eprintln!("pending segments lock was poisoned, recovering");
+        poison.into_inner()
+    })
+}
+
+pub fn add_pending(paths: &[String]) {
+    let mut set = lock_pending();
+    for p in paths {
+        set.insert(PathBuf::from(p));
+    }
+}
+
+pub fn remove_pending(paths: &[String]) {
+    let mut set = lock_pending();
+    for p in paths {
+        let path: &Path = p.as_ref();
+        set.remove(path);
+    }
+}
+
+fn is_pending(path: &Path) -> bool {
+    let set = lock_pending();
+    set.contains(path)
+}
 
 pub async fn manage_disk_space() -> StreamResult<()> {
     let config = Config::get();
@@ -15,7 +46,15 @@ pub async fn manage_disk_space() -> StreamResult<()> {
     let min_free_space = config.get_min_free_space();
     let min_free_bytes = min_free_space.as_bytes();
 
-    let files = collect_recording_files(output_dir_path);
+    let all_files = collect_recording_files(output_dir_path);
+    if all_files.is_empty() {
+        return Ok(());
+    }
+
+    let files: Vec<_> = all_files
+        .into_iter()
+        .filter(|f| !is_pending(&f.path))
+        .collect();
     if files.is_empty() {
         return Ok(());
     }
