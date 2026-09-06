@@ -103,6 +103,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "apto"
+version = "0.1.0"
+dependencies = [
+ "paste",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "async-trait"
 version = "0.1.89"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2103,6 +2112,7 @@ version = "0.2.1"
 dependencies = [
  "anyhow",
  "apple-native-keyring-store",
+ "apto",
  "async-trait",
  "bunkr-client",
  "chrono",

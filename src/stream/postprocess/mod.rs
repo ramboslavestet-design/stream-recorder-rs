@@ -92,7 +92,7 @@ pub async fn post_process_session(
 
                 let config = Config::get();
                 send_program_error_webhook(
-                    config.get_discord_webhook_url(),
+                    config.get_discord_webhook_url().as_deref(),
                     "Failed to combine stream segments",
                     &format!(
                         "Recording for `{}` on platform `{}` produced {} segments that could not be combined into a single file.\nSegments will be processed individually.\n\n{}",
@@ -135,7 +135,7 @@ async fn post_process_stream(stream_info: StreamInfo, output_path: String) -> St
             &output_path,
             duration,
             min_duration,
-            config.get_discord_webhook_url(),
+            config.get_discord_webhook_url().as_deref(),
             stream_info.clone(),
         )
         .await?
@@ -146,7 +146,8 @@ async fn post_process_stream(stream_info: StreamInfo, output_path: String) -> St
     let config = Config::get();
     let webhook_url = config.get_discord_webhook_url();
     if let Err(error) =
-        send_recording_complete_webhook(webhook_url, &stream_info, &duration, &file_size).await
+        send_recording_complete_webhook(webhook_url.as_deref(), &stream_info, &duration, &file_size)
+            .await
     {
         eprintln!("Error sending recorded webhook: {}", error);
     }
@@ -375,7 +376,7 @@ async fn send_template_notification(stream_info: &StreamInfo, template_info: &Te
     let config = Config::get();
     let webhook_url = config.get_discord_webhook_url();
     if let Err(error) = send_template_webhook(
-        webhook_url,
+        webhook_url.as_deref(),
         stream_info,
         &content,
         &template_info.thumbnail_path,

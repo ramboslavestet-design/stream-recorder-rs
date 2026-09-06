@@ -1,14 +1,17 @@
 use std::marker::PhantomData;
 
-use apto::{
-    ConfigType, ConfigValidator, NoValidation, Optional, Required,
-    helpers::{normalize_list_value, parse_csv_list},
-};
+use crate::config_type::ConfigType;
+use crate::error::ConfigError;
+use crate::helpers::{normalize_list_value, parse_csv_list};
+use crate::optionality::{Optional, Required};
+use crate::validator::{ConfigValidator, NoValidation};
 
-/// A comma-separated string list config value (required).
-pub struct StringList<V = NoValidation, O = Required>(PhantomData<(V, O)>);
+/// A comma-separated string list config value.
+///
+/// Serializes as a TOML array of strings (`key = ["a", "b"]`).
+pub struct List<V = NoValidation, O = Required>(PhantomData<(V, O)>);
 
-impl<V: ConfigValidator<Option<Vec<String>>>> ConfigType for StringList<V, Required> {
+impl<V: ConfigValidator<Option<Vec<String>>>> ConfigType for List<V, Required> {
     type Stored = Option<Vec<String>>;
     type Default = Vec<String>;
     type Value = Vec<String>;
@@ -17,7 +20,7 @@ impl<V: ConfigValidator<Option<Vec<String>>>> ConfigType for StringList<V, Requi
         stored.clone().unwrap_or_else(|| default.clone())
     }
 
-    fn parse(input: &str, default: &Self::Default) -> Result<Self::Stored, apto::ConfigError> {
+    fn parse(input: &str, default: &Self::Default) -> Result<Self::Stored, ConfigError> {
         Ok(normalize_list_value(parse_csv_list(input), default))
     }
 
@@ -34,12 +37,12 @@ impl<V: ConfigValidator<Option<Vec<String>>>> ConfigType for StringList<V, Requi
         Some(default)
     }
 
-    fn validate(stored: &Self::Stored) -> Result<(), apto::ConfigError> {
+    fn validate(stored: &Self::Stored) -> Result<(), ConfigError> {
         V::validate(stored)
     }
 }
 
-impl<V: ConfigValidator<Option<Vec<String>>>> ConfigType for StringList<V, Optional> {
+impl<V: ConfigValidator<Option<Vec<String>>>> ConfigType for List<V, Optional> {
     type Stored = Option<Vec<String>>;
     type Default = Option<Vec<String>>;
     type Value = Option<Vec<String>>;
@@ -48,7 +51,7 @@ impl<V: ConfigValidator<Option<Vec<String>>>> ConfigType for StringList<V, Optio
         stored.clone().or_else(|| default.clone())
     }
 
-    fn parse(input: &str, default: &Self::Default) -> Result<Self::Stored, apto::ConfigError> {
+    fn parse(input: &str, default: &Self::Default) -> Result<Self::Stored, ConfigError> {
         let parsed = parse_csv_list(input);
         let normalized = match (&parsed, default) {
             (Some(values), Some(default_values)) if values == default_values => None,
@@ -70,7 +73,7 @@ impl<V: ConfigValidator<Option<Vec<String>>>> ConfigType for StringList<V, Optio
         default
     }
 
-    fn validate(stored: &Self::Stored) -> Result<(), apto::ConfigError> {
+    fn validate(stored: &Self::Stored) -> Result<(), ConfigError> {
         V::validate(stored)
     }
 }
@@ -80,10 +83,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn required_list_default() {
+        let default = vec!["a".to_string(), "b".to_string()];
+        assert_eq!(
+            List::<NoValidation, Required>::get(&None, &default),
+            vec!["a".to_string(), "b".to_string()]
+        );
+    }
+
+    #[test]
     fn list_parse_csv() {
         let default = Vec::<String>::new();
         assert_eq!(
-            StringList::<NoValidation, Required>::parse("one, two", &default).unwrap(),
+            List::<NoValidation, Required>::parse("one, two", &default).unwrap(),
             Some(vec!["one".to_string(), "two".to_string()])
         );
     }
@@ -92,7 +104,7 @@ mod tests {
     fn list_normalizes_default() {
         let default = vec!["a".to_string(), "b".to_string()];
         assert_eq!(
-            StringList::<NoValidation, Required>::parse("a, b", &default).unwrap(),
+            List::<NoValidation, Required>::parse("a, b", &default).unwrap(),
             None
         );
     }

@@ -66,11 +66,8 @@ pub fn handle_config_command(action: ConfigAction) -> Result<()> {
         }
         ConfigAction::Add { key, value } => {
             let mut config = Config::load()?;
-            let config_key =
+            let _config_key =
                 ConfigKey::from_key(&key).ok_or_else(|| anyhow::anyhow!("Unknown key: {}", key))?;
-            if !config_key.is_array() {
-                return Err(anyhow::anyhow!("Key '{}' is not an array setting", key));
-            }
             let current = config.get_value(&key);
             let mut vec = parse_array_value(&current);
             if !vec.contains(&value) {
@@ -85,11 +82,8 @@ pub fn handle_config_command(action: ConfigAction) -> Result<()> {
         }
         ConfigAction::Remove { key, value } => {
             let mut config = Config::load()?;
-            let config_key =
+            let _config_key =
                 ConfigKey::from_key(&key).ok_or_else(|| anyhow::anyhow!("Unknown key: {}", key))?;
-            if !config_key.is_array() {
-                return Err(anyhow::anyhow!("Key '{}' is not an array setting", key));
-            }
             let current = config.get_value(&key);
             if current == "none" {
                 println!("'{}' is empty", key);

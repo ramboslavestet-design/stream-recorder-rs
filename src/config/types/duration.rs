@@ -1,127 +1,125 @@
-use crate::config::types::{
-    ConfigType, ConfigValidator, NoValidation, normalize_optional_value, parse_optional_value,
-};
-use crate::types::DurationValue;
-use anyhow::Result;
 use std::marker::PhantomData;
 use std::time::Duration as StdDuration;
 
-fn parse_duration_cli(input: &str) -> Result<DurationValue> {
-    crate::types::parse_duration_input(input)
-        .map_err(|error| anyhow::anyhow!("Invalid duration '{}': {}", input, error))
+use apto::{
+    ConfigType, ConfigValidator, NoValidation, Optional, Required,
+    helpers::{normalize_optional_value, parse_optional_value},
+};
+
+use crate::types::DurationValue;
+
+fn parse_duration_cli(input: &str) -> Result<DurationValue, apto::ConfigError> {
+    crate::types::parse_duration_input(input).map_err(|e| {
+        apto::ConfigError::InvalidValue(format!("Invalid duration '{}': {}", input, e))
+    })
 }
 
-pub struct Duration<V = NoValidation>(PhantomData<V>);
+/// Duration config value (required — always resolves to a `StdDuration`).
+pub struct Duration<V = NoValidation, O = Required>(PhantomData<(V, O)>);
 
-impl<V> ConfigType for Duration<V>
-where
-    V: ConfigValidator<Option<DurationValue>>,
-{
+impl<V: ConfigValidator<Option<DurationValue>>> ConfigType for Duration<V, Required> {
     type Stored = Option<DurationValue>;
     type Default = DurationValue;
-    type Value<'a> = StdDuration;
+    type Value = StdDuration;
 
-    fn get<'a>(stored: &'a Self::Stored, default: &'a Self::Default) -> Self::Value<'a> {
+    fn get(stored: &Self::Stored, default: &Self::Default) -> Self::Value {
         stored
-            .map(|value| value.as_duration())
+            .map(|v| v.as_duration())
             .unwrap_or_else(|| default.as_duration())
     }
 
-    fn parse(input: &str, default: &Self::Default) -> Result<Self::Stored> {
-        Ok(normalize_optional_value(
-            parse_optional_value(input, parse_duration_cli)?,
-            Some(*default),
-        ))
+    fn parse(input: &str, default: &Self::Default) -> Result<Self::Stored, apto::ConfigError> {
+        let is_none = input.eq_ignore_ascii_case("none");
+        if is_none {
+            return Err(apto::ConfigError::InvalidValue(format!(
+                "'none' is not valid for a required duration field"
+            )));
+        }
+        let parsed = parse_duration_cli(input).map(Some)?;
+        Ok(normalize_optional_value(parsed, Some(*default)))
     }
 
-    fn validate(stored: &Self::Stored) -> Result<()> {
+    fn format(stored: &Self::Stored, default: &Self::Default) -> String {
+        stored.unwrap_or(*default).to_string()
+    }
+
+    fn stored_from_default(default: Self::Default) -> Self::Stored {
+        Some(default)
+    }
+
+    fn validate(stored: &Self::Stored) -> Result<(), apto::ConfigError> {
         V::validate(stored)
     }
 }
 
-pub struct OptionalDuration<V = NoValidation>(PhantomData<V>);
+/// Duration config value (optional — may resolve to `None`).
+pub type OptionalDuration<V = NoValidation> = Duration<V, Optional>;
 
-impl<V> ConfigType for OptionalDuration<V>
-where
-    V: ConfigValidator<Option<DurationValue>>,
-{
+impl<V: ConfigValidator<Option<DurationValue>>> ConfigType for Duration<V, Optional> {
     type Stored = Option<DurationValue>;
     type Default = Option<DurationValue>;
-    type Value<'a> = Option<StdDuration>;
+    type Value = Option<StdDuration>;
 
-    fn get<'a>(stored: &'a Self::Stored, default: &'a Self::Default) -> Self::Value<'a> {
+    fn get(stored: &Self::Stored, default: &Self::Default) -> Self::Value {
         stored
-            .map(|value| value.as_duration())
+            .map(|v| v.as_duration())
             .or_else(|| default.map(DurationValue::into_duration))
     }
 
-    fn parse(input: &str, default: &Self::Default) -> Result<Self::Stored> {
-        Ok(normalize_optional_value(
-            parse_optional_value(input, parse_duration_cli)?,
-            *default,
-        ))
+    fn parse(input: &str, default: &Self::Default) -> Result<Self::Stored, apto::ConfigError> {
+        let parsed = parse_optional_value(input, parse_duration_cli)?;
+        Ok(normalize_optional_value(parsed, *default))
     }
 
-    fn validate(stored: &Self::Stored) -> Result<()> {
+    fn format(stored: &Self::Stored, default: &Self::Default) -> String {
+        stored
+            .or(*default)
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "none".to_string())
+    }
+
+    fn stored_from_default(default: Self::Default) -> Self::Stored {
+        default
+    }
+
+    fn validate(stored: &Self::Stored) -> Result<(), apto::ConfigError> {
         V::validate(stored)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Duration, OptionalDuration};
-    use crate::config::types::{ConfigType, NoValidation};
+    use super::*;
     use crate::types::DurationValue;
-    use std::time::Duration as StdDuration;
-
-    type DurationType = Duration<NoValidation>;
-    type OptionalDurationType = OptionalDuration<NoValidation>;
 
     #[test]
-    fn duration_type_parses_and_formats_cli_values() {
+    fn required_default() {
         let default = DurationValue::from_millis(500);
-
         assert_eq!(
-            DurationType::parse("2s", &default).expect("valid duration should parse"),
-            Some(DurationValue::from_secs(2))
-        );
-        assert_eq!(
-            DurationType::parse("500ms", &default).expect("default duration should normalize"),
-            None
-        );
-        assert_eq!(
-            DurationType::format(&Some(DurationValue::from_secs(2)), &default),
-            "2s"
-        );
-        assert_eq!(DurationType::format_default(&default), "500ms");
-        assert_eq!(
-            DurationType::get(&Some(DurationValue::from_secs(2)), &default),
-            StdDuration::from_secs(2)
-        );
-        assert_eq!(
-            DurationType::get(&None, &default),
+            Duration::<NoValidation, Required>::get(&None, &default),
             StdDuration::from_millis(500)
+        );
+        assert_eq!(
+            Duration::<NoValidation, Required>::get(&Some(DurationValue::from_secs(2)), &default),
+            StdDuration::from_secs(2)
         );
     }
 
     #[test]
-    fn optional_duration_type_handles_none_and_defaults() {
-        let default = Some(DurationValue::from_secs(90));
+    fn required_rejects_none() {
+        let default = DurationValue::from_millis(500);
+        assert!(Duration::<NoValidation, Required>::parse("none", &default).is_err());
+    }
 
+    #[test]
+    fn optional_accepts_none() {
+        let default = Some(DurationValue::from_secs(90));
         assert_eq!(
-            OptionalDurationType::parse("none", &default)
-                .expect("none should clear optional durations"),
+            Duration::<NoValidation, Optional>::parse("none", &default).unwrap(),
             None
         );
         assert_eq!(
-            OptionalDurationType::parse("2m", &default)
-                .expect("valid optional duration should parse"),
-            Some(DurationValue::from_secs(120))
-        );
-        assert_eq!(OptionalDurationType::format(&None, &default), "1m 30s");
-        assert_eq!(OptionalDurationType::format_default(&default), "1m 30s");
-        assert_eq!(
-            OptionalDurationType::get(&None, &default),
+            Duration::<NoValidation, Optional>::get(&None, &default),
             Some(StdDuration::from_secs(90))
         );
     }

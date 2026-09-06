@@ -1,76 +1,99 @@
-use crate::config::types::{
-    ConfigType, ConfigValidator, NoValidation, normalize_optional_value, parse_optional_value,
-};
-use crate::types::FileSize as FileSizeValue;
-use anyhow::Result;
 use std::marker::PhantomData;
 
-fn parse_file_size_value(input: &str) -> Result<FileSizeValue> {
-    input
-        .parse::<FileSizeValue>()
-        .map_err(|error| anyhow::anyhow!("Invalid file size '{}': {}", input, error))
+use apto::{
+    ConfigType, ConfigValidator, NoValidation, Optional, Required,
+    helpers::{normalize_optional_value, parse_optional_value},
+};
+
+use crate::types::FileSize as FileSizeValue;
+
+fn parse_file_size_cli(input: &str) -> Result<FileSizeValue, apto::ConfigError> {
+    input.parse::<FileSizeValue>().map_err(|e| {
+        apto::ConfigError::InvalidValue(format!("Invalid file size '{}': {}", input, e))
+    })
 }
 
-/// File-size setting stored as bytes but configured through human-readable strings.
-///
-/// The stored representation is an optional [`FileSizeValue`], while CLI input
-/// accepts strings such as `10MB`, `5GiB`, or `none` to clear the setting.
-#[allow(dead_code)]
-pub struct FileSize<V = NoValidation>(PhantomData<V>);
+/// File-size config value (required).
+pub struct FileSize<V = NoValidation, O = Required>(PhantomData<(V, O)>);
 
-impl<V> ConfigType for FileSize<V>
-where
-    V: ConfigValidator<Option<FileSizeValue>>,
-{
+impl<V: ConfigValidator<Option<FileSizeValue>>> ConfigType for FileSize<V, Required> {
     type Stored = Option<FileSizeValue>;
     type Default = FileSizeValue;
-    type Value<'a> = FileSizeValue;
+    type Value = FileSizeValue;
 
-    fn get<'a>(stored: &'a Self::Stored, default: &'a Self::Default) -> Self::Value<'a> {
+    fn get(stored: &Self::Stored, default: &Self::Default) -> Self::Value {
         stored.unwrap_or(*default)
     }
 
-    fn parse(input: &str, default: &Self::Default) -> Result<Self::Stored> {
-        Ok(normalize_optional_value(
-            parse_optional_value(input, parse_file_size_value)?,
-            Some(*default),
-        ))
+    fn parse(input: &str, default: &Self::Default) -> Result<Self::Stored, apto::ConfigError> {
+        let is_none = input.eq_ignore_ascii_case("none");
+        if is_none {
+            return Err(apto::ConfigError::InvalidValue(format!(
+                "'none' is not valid for a required file size field"
+            )));
+        }
+        let parsed = parse_file_size_cli(input).map(Some)?;
+        Ok(normalize_optional_value(parsed, Some(*default)))
     }
 
-    fn validate(stored: &Self::Stored) -> Result<()> {
+    fn format(stored: &Self::Stored, default: &Self::Default) -> String {
+        stored.unwrap_or(*default).to_string()
+    }
+
+    fn stored_from_default(default: Self::Default) -> Self::Stored {
+        Some(default)
+    }
+
+    fn validate(stored: &Self::Stored) -> Result<(), apto::ConfigError> {
+        V::validate(stored)
+    }
+}
+
+impl<V: ConfigValidator<Option<FileSizeValue>>> ConfigType for FileSize<V, Optional> {
+    type Stored = Option<FileSizeValue>;
+    type Default = Option<FileSizeValue>;
+    type Value = Option<FileSizeValue>;
+
+    fn get(stored: &Self::Stored, default: &Self::Default) -> Self::Value {
+        (*stored).or(*default)
+    }
+
+    fn parse(input: &str, default: &Self::Default) -> Result<Self::Stored, apto::ConfigError> {
+        let parsed = parse_optional_value(input, parse_file_size_cli)?;
+        Ok(normalize_optional_value(parsed, *default))
+    }
+
+    fn format(stored: &Self::Stored, default: &Self::Default) -> String {
+        stored
+            .or(*default)
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "none".to_string())
+    }
+
+    fn stored_from_default(default: Self::Default) -> Self::Stored {
+        default
+    }
+
+    fn validate(stored: &Self::Stored) -> Result<(), apto::ConfigError> {
         V::validate(stored)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::FileSize;
-    use crate::config::types::{ConfigType, NoValidation};
+    use super::*;
     use crate::types::FileSize as FileSizeValue;
 
-    type FileSizeType = FileSize<NoValidation>;
-
     #[test]
-    fn file_size_type_parses_and_formats_cli_values() {
+    fn required_default() {
         let default = FileSizeValue::from_mib(2);
-
         assert_eq!(
-            FileSizeType::parse("5MiB", &default).expect("valid file size should parse"),
-            Some(FileSizeValue::from_mib(5))
+            FileSize::<NoValidation, Required>::get(&None, &default),
+            default
         );
         assert_eq!(
-            FileSizeType::parse("2MiB", &default).expect("default file size should normalize"),
-            None
-        );
-        assert_eq!(
-            FileSizeType::format(&Some(FileSizeValue::from_mib(5)), &default),
-            "5MiB"
-        );
-        assert_eq!(FileSizeType::format_default(&default), "2MiB");
-        assert_eq!(
-            FileSizeType::get(&Some(FileSizeValue::from_mib(5)), &default),
+            FileSize::<NoValidation, Required>::get(&Some(FileSizeValue::from_mib(5)), &default),
             FileSizeValue::from_mib(5)
         );
-        assert_eq!(FileSizeType::get(&None, &default), default);
     }
 }

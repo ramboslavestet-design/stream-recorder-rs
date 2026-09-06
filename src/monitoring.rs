@@ -59,7 +59,7 @@ impl MonitorSupervisor {
                 {
                     eprintln!("Error updating monitored users: {}", error);
                     send_program_error_webhook(
-                        config.get_discord_webhook_url(),
+                        config.get_discord_webhook_url().as_deref(),
                         "Monitor reconciliation failed",
                         &format!(
                             "Failed to update monitored users after a config reload.\n\n{error}"
@@ -72,7 +72,7 @@ impl MonitorSupervisor {
                 eprintln!("Error reloading config: {}", error);
                 let config = Config::get();
                 send_program_error_webhook(
-                    config.get_discord_webhook_url(),
+                    config.get_discord_webhook_url().as_deref(),
                     "Configuration reload failed",
                     &format!(
                         "The running process could not reload `config.toml` and kept the previous configuration.\n\n{error}"
@@ -119,7 +119,7 @@ impl MonitorSupervisor {
                 eprintln!("Malformed monitor string '{}', skipping.", monitor);
                 let config = Config::get();
                 send_program_error_webhook(
-                    config.get_discord_webhook_url(),
+                    config.get_discord_webhook_url().as_deref(),
                     "Monitor failed to start",
                     &format!(
                         "Configured monitor `{monitor}` is malformed. Expected the format `platform_id:username`."
@@ -139,7 +139,7 @@ impl MonitorSupervisor {
                 );
                 let config = Config::get();
                 send_program_error_webhook(
-                    config.get_discord_webhook_url(),
+                    config.get_discord_webhook_url().as_deref(),
                     "Monitor failed to start",
                     &format!("Monitor `{monitor}` references unknown platform `{platform_id}`."),
                 )
@@ -157,7 +157,7 @@ impl MonitorSupervisor {
                 );
                 let config = Config::get();
                 send_program_error_webhook(
-                    config.get_discord_webhook_url(),
+                    config.get_discord_webhook_url().as_deref(),
                     "Monitor failed to start",
                     &format!(
                         "Unable to resolve credentials for monitor `{monitor}` on platform `{platform_id}`.\n\n{error}"
