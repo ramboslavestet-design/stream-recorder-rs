@@ -34,7 +34,35 @@ pub fn remove_pending(paths: &[String]) {
     }
 }
 
-fn is_pending(path: &Path) -> bool {
+/// Keeps paths in the pending set until dropped.
+pub struct PendingGuard {
+    paths: Vec<PathBuf>,
+}
+
+impl PendingGuard {
+    pub fn new(paths: &[String]) -> Self {
+        add_pending(paths);
+        Self {
+            paths: paths.iter().map(PathBuf::from).collect(),
+        }
+    }
+
+    pub fn add(&mut self, path: &str) {
+        lock_pending().insert(PathBuf::from(path));
+        self.paths.push(PathBuf::from(path));
+    }
+}
+
+impl Drop for PendingGuard {
+    fn drop(&mut self) {
+        let mut set = lock_pending();
+        for path in &self.paths {
+            set.remove(path);
+        }
+    }
+}
+
+pub(crate) fn is_pending(path: &Path) -> bool {
     let set = lock_pending();
     set.contains(path)
 }
@@ -230,9 +258,12 @@ fn retention_keep_latest_per_user(
 
 #[cfg(test)]
 mod tests {
-    use super::{RecordingFile, retention_age_candidates, retention_keep_latest_per_user};
+    use super::{
+        PendingGuard, RecordingFile, is_pending, retention_age_candidates,
+        retention_keep_latest_per_user,
+    };
     use std::collections::HashSet;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::time::{Duration, SystemTime};
 
     #[test]
@@ -284,5 +315,19 @@ mod tests {
 
         let expected = HashSet::from([PathBuf::from("recordings/old.mp4")]);
         assert_eq!(candidates, expected);
+    }
+
+    #[test]
+    fn pending_guard_holds_until_dropped() {
+        let path = "recordings/pending-guard-check.mp4".to_string();
+        assert!(!is_pending(Path::new(&path)));
+        {
+            let mut guard = PendingGuard::new(std::slice::from_ref(&path));
+            assert!(is_pending(Path::new(&path)));
+            guard.add("recordings/pending-guard-extra.mp4");
+            assert!(is_pending(Path::new("recordings/pending-guard-extra.mp4")));
+        }
+        assert!(!is_pending(Path::new(&path)));
+        assert!(!is_pending(Path::new("recordings/pending-guard-extra.mp4")));
     }
 }

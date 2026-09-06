@@ -17,9 +17,14 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 use std::time::SystemTime;
 use thumb::create_video_thumbnail_grid;
 use tiny_table::{Cell, Column, ColumnWidth, Table};
+
+/// Ensures only one post-processing session runs at a time.
+static POSTPROCESS_LOCK: LazyLock<tokio::sync::Mutex<()>> =
+    LazyLock::new(|| tokio::sync::Mutex::new(()));
 
 #[derive(Clone)]
 struct RecordingFile {
@@ -53,8 +58,18 @@ pub async fn post_process_session(
         return Ok(());
     }
 
-    let pending = session_files.clone();
-    storage::add_pending(&pending);
+    let mut pending_guard = storage::PendingGuard::new(&session_files);
+
+    let _postprocess_guard = match POSTPROCESS_LOCK.try_lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            println!(
+                "Post-processing for {} is queuing behind the session already in progress...",
+                stream_info.username
+            );
+            POSTPROCESS_LOCK.lock().await
+        }
+    };
 
     let result = if session_files.len() == 1 {
         let file = session_files
@@ -75,6 +90,8 @@ pub async fn post_process_session(
                     "Successfully combined stream segments into: {}",
                     combined_path
                 );
+
+                pending_guard.add(&combined_path);
 
                 for file in &session_files {
                     if let Err(error) = tokio::fs::remove_file(file).await {
@@ -117,7 +134,7 @@ pub async fn post_process_session(
         }
     };
 
-    storage::remove_pending(&pending);
+    drop(pending_guard);
     if let Err(error) = storage::manage_disk_space().await {
         eprintln!("Error managing disk space: {}", error);
     }
@@ -447,7 +464,7 @@ async fn handle_minimum_duration(
 
 #[cfg(test)]
 mod tests {
-    use super::{build_ffconcat_manifest, concat_video_files};
+    use super::{POSTPROCESS_LOCK, build_ffconcat_manifest, concat_video_files};
 
     fn ffmpeg_is_available() -> bool {
         std::process::Command::new("ffmpeg")
@@ -560,6 +577,43 @@ mod tests {
         assert!(
             combined_metadata.len() > 0,
             "combined output should not be empty"
+        );
+    }
+
+    #[tokio::test]
+    async fn postprocess_lock_serializes_concurrent_holders() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+
+        let current = Arc::new(AtomicUsize::new(0));
+        let max_observed = Arc::new(AtomicUsize::new(0));
+
+        let mut handles = Vec::new();
+        for _ in 0..8 {
+            let current = Arc::clone(&current);
+            let max_observed = Arc::clone(&max_observed);
+            handles.push(tokio::spawn(async move {
+                let _guard = POSTPROCESS_LOCK.lock().await;
+                let now = current.fetch_add(1, Ordering::SeqCst) + 1;
+                max_observed.fetch_max(now, Ordering::SeqCst);
+                // Widen the race window: without mutual exclusion another task
+                // would overlap here and push the observed count above one.
+                tokio::task::yield_now().await;
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                current.fetch_sub(1, Ordering::SeqCst);
+            }));
+        }
+
+        for handle in handles {
+            handle.await.expect("postprocess lock task panicked");
+        }
+
+        assert_eq!(
+            max_observed.load(Ordering::SeqCst),
+            1,
+            "post-processing lock must allow only one holder at a time"
         );
     }
 }
