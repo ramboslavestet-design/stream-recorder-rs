@@ -26,7 +26,7 @@ pub async fn monitor_stream(username: &str, platform: &PlatformConfig, token: &s
                         eprintln!("{message}");
                         let config = Config::get();
                         send_program_error_webhook(
-                            config.get_discord_webhook_url(),
+                            config.get_discord_webhook_url().as_deref(),
                             "Live stream metadata was incomplete",
                             &format!(
                                 "Platform `{}` reported `{}` as live, but the pipeline did not extract `playback_url`.",
@@ -42,7 +42,7 @@ pub async fn monitor_stream(username: &str, platform: &PlatformConfig, token: &s
                 eprintln!("Error running pipeline for {}: {}", username, error);
                 let config = Config::get();
                 send_program_error_webhook(
-                    config.get_discord_webhook_url(),
+                    config.get_discord_webhook_url().as_deref(),
                     "Pipeline error",
                     &format!(
                         "Running the pipeline for `{}` on platform `{}` failed.\n\n{}",
@@ -81,7 +81,7 @@ async fn record_session(stream_info: StreamInfo, token: &str) {
                 eprintln!("Error recording {} for {}: {}", label, username, error);
                 let config = Config::get();
                 send_program_error_webhook(
-                    config.get_discord_webhook_url(),
+                    config.get_discord_webhook_url().as_deref(),
                     "Recording failed",
                     &format!(
                         "Recording the {} for `{}` on platform `{}` failed.\n\n{}",
@@ -128,7 +128,7 @@ async fn record_session(stream_info: StreamInfo, token: &str) {
             eprintln!("Error post-processing session: {}", error);
             let config = Config::get();
             send_program_error_webhook(
-                config.get_discord_webhook_url(),
+                config.get_discord_webhook_url().as_deref(),
                 "Post-processing failed",
                 &format!(
                     "Post-processing failed for `{}` on platform `{}`.\n\n{}",
@@ -166,7 +166,7 @@ async fn next_live_stream(
                 eprintln!("Pipeline returned Live but 'playback_url' was not extracted");
                 let config = Config::get();
                 send_program_error_webhook(
-                    config.get_discord_webhook_url(),
+                    config.get_discord_webhook_url().as_deref(),
                     "Continuation stream metadata was incomplete",
                     &format!(
                         "Platform `{}` reported `{}` as live during the continuation window, but the pipeline did not extract `playback_url`.",
@@ -183,7 +183,7 @@ async fn next_live_stream(
                 );
                 let config = Config::get();
                 send_program_error_webhook(
-                    config.get_discord_webhook_url(),
+                    config.get_discord_webhook_url().as_deref(),
                     "Pipeline error during continuation window",
                     &format!(
                         "Running the pipeline for `{}` on platform `{}` failed during the continuation window.\n\n{}",

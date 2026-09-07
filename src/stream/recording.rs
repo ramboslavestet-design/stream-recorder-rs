@@ -4,6 +4,7 @@ use crate::platform::PipelineOutcome;
 use crate::stream::api::run_pipeline;
 use crate::stream::encoding::{VideoEncoding, build_ffmpeg_args, detect_best_hw_encoder};
 use crate::stream::messages::{send_program_error_webhook, send_recording_start_webhook};
+use crate::stream::postprocess::storage::{add_pending, remove_pending};
 use crate::utils::slugify;
 use chrono::{DateTime, Utc};
 use std::process::Stdio;
@@ -94,11 +95,13 @@ pub async fn record_segment(
     );
 
     let output_path = build_output_path(&stream_info.username)?;
+    add_pending(std::slice::from_ref(&output_path));
 
     if !is_continuation {
         let config = Config::get();
         let webhook_url = config.get_discord_webhook_url();
-        if let Err(error) = send_recording_start_webhook(webhook_url, stream_info).await {
+        if let Err(error) = send_recording_start_webhook(webhook_url.as_deref(), stream_info).await
+        {
             eprintln!("Error sending start webhook: {}", error);
         }
     }
@@ -106,14 +109,20 @@ pub async fn record_segment(
     let ffmpeg_args = build_recording_args(stream_info, &output_path).await;
     let mut command = tokio::process::Command::new("ffmpeg");
     command.args(&ffmpeg_args);
-
-    let recorder = StreamRecorder::new(&mut command).await?;
-    if let Some(refresh_interval) = Config::get().get_stream_metadata_refresh_interval() {
-        recorder
-            .wait_with_metadata_refresh(stream_info, token, refresh_interval)
-            .await?;
-    } else {
-        recorder.wait().await?;
+    let recorder = StreamRecorder::new(&mut command).await.inspect_err(|_| {
+        remove_pending(std::slice::from_ref(&output_path));
+    })?;
+    let wait_result =
+        if let Some(refresh_interval) = Config::get().get_stream_metadata_refresh_interval() {
+            recorder
+                .wait_with_metadata_refresh(stream_info, token, refresh_interval)
+                .await
+        } else {
+            recorder.wait().await
+        };
+    if let Err(e) = wait_result {
+        remove_pending(std::slice::from_ref(&output_path));
+        return Err(e);
     }
 
     Ok(output_path)
@@ -153,7 +162,7 @@ async fn build_recording_args(stream_info: &StreamInfo, output_path: &str) -> Ve
         output_path,
         &encoding,
         hw_encoder,
-        max_bitrate,
+        max_bitrate.as_deref(),
         max_fps,
     )
 }
@@ -178,7 +187,7 @@ async fn refresh_stream_info(stream_info: &mut StreamInfo, token: &str) {
             );
             let config = Config::get();
             send_program_error_webhook(
-                config.get_discord_webhook_url(),
+                config.get_discord_webhook_url().as_deref(),
                 "Stream metadata refresh failed",
                 &format!(
                     "Failed to refresh stream metadata for `{}` on platform `{}` during an active recording.\n\n{}",

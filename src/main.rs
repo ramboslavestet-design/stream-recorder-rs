@@ -194,7 +194,7 @@ async fn main() -> Result<()> {
                     eprintln!("Aborting startup. Fix the issue and try again.");
                     let config = Config::get();
                     send_program_error_webhook(
-                        config.get_discord_webhook_url(),
+                        config.get_discord_webhook_url().as_deref(),
                         "Startup verification failed",
                         &format!(
                             "The recorder aborted before starting any monitors because startup verification failed.\n\n{}",
@@ -211,7 +211,7 @@ async fn main() -> Result<()> {
                 Err(error) => {
                     let config = Config::get();
                     send_program_error_webhook(
-                        config.get_discord_webhook_url(),
+                        config.get_discord_webhook_url().as_deref(),
                         "Platform configuration failed to load",
                         &format!(
                             "One or more installed platform definitions could not be loaded.\n\n{}",

@@ -1,6 +1,5 @@
-use crate::config::types::ConfigValidator;
 use crate::stream::postprocess::thumb::parse_thumbnail_string;
-use anyhow::Result;
+use apto::ConfigValidator;
 
 pub struct VideoQuality;
 pub struct ThumbnailSize;
@@ -13,7 +12,7 @@ pub struct Url;
 pub struct RegexList;
 
 impl ConfigValidator<Option<u32>> for VideoQuality {
-    fn validate(value: &Option<u32>) -> Result<()> {
+    fn validate(value: &Option<u32>) -> Result<(), apto::ConfigError> {
         let Some(value) = value else {
             return Ok(());
         };
@@ -21,49 +20,58 @@ impl ConfigValidator<Option<u32>> for VideoQuality {
         if (1..=51).contains(value) {
             Ok(())
         } else {
-            Err(anyhow::anyhow!("video quality must be between 1 and 51"))
+            Err(apto::ConfigError::InvalidValue(format!(
+                "video quality must be between 1 and 51"
+            )))
         }
     }
 }
 
-fn validate_thumbnail_pair(value: &Option<String>, label: &str, format_hint: &str) -> Result<()> {
+fn validate_thumbnail_pair(
+    value: &Option<String>,
+    label: &str,
+    format_hint: &str,
+) -> Result<(), apto::ConfigError> {
     let Some(value) = value.as_deref() else {
         return Ok(());
     };
 
-    let (first, second) = parse_thumbnail_string(value)
-        .ok_or_else(|| anyhow::anyhow!("{label} must use {format_hint} format"))?;
+    let (first, second) = parse_thumbnail_string(value).ok_or_else(|| {
+        apto::ConfigError::InvalidValue(format!("{label} must use {format_hint} format"))
+    })?;
 
     if first == 0 || second == 0 {
-        return Err(anyhow::anyhow!("{label} values must be greater than zero"));
+        return Err(apto::ConfigError::InvalidValue(format!(
+            "{label} values must be greater than zero"
+        )));
     }
 
     Ok(())
 }
 
 impl ConfigValidator<Option<String>> for ThumbnailSize {
-    fn validate(value: &Option<String>) -> Result<()> {
+    fn validate(value: &Option<String>) -> Result<(), apto::ConfigError> {
         validate_thumbnail_pair(value, "thumbnail size", "WIDTHxHEIGHT")
     }
 }
 
 impl ConfigValidator<Option<String>> for ThumbnailGrid {
-    fn validate(value: &Option<String>) -> Result<()> {
+    fn validate(value: &Option<String>) -> Result<(), apto::ConfigError> {
         validate_thumbnail_pair(value, "thumbnail grid", "COLSxROWS")
     }
 }
 
 impl ConfigValidator<Option<String>> for FfmpegBitrate {
-    fn validate(value: &Option<String>) -> Result<()> {
+    fn validate(value: &Option<String>) -> Result<(), apto::ConfigError> {
         let Some(value) = value.as_deref() else {
             return Ok(());
         };
 
         let bitrate = value.trim();
         if bitrate.is_empty() {
-            return Err(anyhow::anyhow!(
+            return Err(apto::ConfigError::InvalidValue(format!(
                 "bitrate cannot be empty; use 'none' to clear the setting"
-            ));
+            )));
         }
 
         let split_index = bitrate
@@ -72,44 +80,46 @@ impl ConfigValidator<Option<String>> for FfmpegBitrate {
         let (number_part, suffix) = bitrate.split_at(split_index);
 
         if number_part.is_empty() {
-            return Err(anyhow::anyhow!(
+            return Err(apto::ConfigError::InvalidValue(format!(
                 "bitrate must start with a number, e.g. 2500k or 6M"
-            ));
+            )));
         }
 
         if number_part.starts_with('.') || number_part.ends_with('.') {
-            return Err(anyhow::anyhow!(
+            return Err(apto::ConfigError::InvalidValue(format!(
                 "bitrate number must be a whole number or decimal like 2.5M"
-            ));
+            )));
         }
 
         if number_part.chars().filter(|&ch| ch == '.').count() > 1 {
-            return Err(anyhow::anyhow!(
+            return Err(apto::ConfigError::InvalidValue(format!(
                 "bitrate number must contain at most one decimal point"
-            ));
+            )));
         }
 
-        let numeric_value = number_part
-            .parse::<f64>()
-            .map_err(|_| anyhow::anyhow!("bitrate must contain a valid positive number"))?;
+        let numeric_value = number_part.parse::<f64>().map_err(|_| {
+            apto::ConfigError::InvalidValue(format!("bitrate must contain a valid positive number"))
+        })?;
 
         if !numeric_value.is_finite() || numeric_value <= 0.0 {
-            return Err(anyhow::anyhow!("bitrate must be greater than zero"));
+            return Err(apto::ConfigError::InvalidValue(format!(
+                "bitrate must be greater than zero"
+            )));
         }
 
         let suffix = suffix.to_ascii_lowercase();
         if matches!(suffix.as_str(), "" | "k" | "m" | "g" | "ki" | "mi" | "gi") {
             Ok(())
         } else {
-            Err(anyhow::anyhow!(
+            Err(apto::ConfigError::InvalidValue(format!(
                 "bitrate must use an ffmpeg-style suffix like 2500k, 6M, or 2.5Mi"
-            ))
+            )))
         }
     }
 }
 
 impl ConfigValidator<Option<u32>> for PositiveU32 {
-    fn validate(value: &Option<u32>) -> Result<()> {
+    fn validate(value: &Option<u32>) -> Result<(), apto::ConfigError> {
         let Some(value) = value else {
             return Ok(());
         };
@@ -117,13 +127,15 @@ impl ConfigValidator<Option<u32>> for PositiveU32 {
         if *value > 0 {
             Ok(())
         } else {
-            Err(anyhow::anyhow!("value must be greater than zero"))
+            Err(apto::ConfigError::InvalidValue(format!(
+                "value must be greater than zero"
+            )))
         }
     }
 }
 
 impl ConfigValidator<Option<f64>> for PositiveF64 {
-    fn validate(value: &Option<f64>) -> Result<()> {
+    fn validate(value: &Option<f64>) -> Result<(), apto::ConfigError> {
         let Some(value) = value else {
             return Ok(());
         };
@@ -131,13 +143,15 @@ impl ConfigValidator<Option<f64>> for PositiveF64 {
         if *value > 0.0 {
             Ok(())
         } else {
-            Err(anyhow::anyhow!("value must be greater than zero"))
+            Err(apto::ConfigError::InvalidValue(format!(
+                "value must be greater than zero"
+            )))
         }
     }
 }
 
 impl ConfigValidator<Option<String>> for Url {
-    fn validate(value: &Option<String>) -> Result<()> {
+    fn validate(value: &Option<String>) -> Result<(), apto::ConfigError> {
         let Some(value) = value.as_deref() else {
             return Ok(());
         };
@@ -145,21 +159,23 @@ impl ConfigValidator<Option<String>> for Url {
         if value.starts_with("https://") || value.starts_with("http://") {
             Ok(())
         } else {
-            Err(anyhow::anyhow!("URL must start with http:// or https://"))
+            Err(apto::ConfigError::InvalidValue(format!(
+                "URL must start with http:// or https://"
+            )))
         }
     }
 }
 
 impl ConfigValidator<Option<Vec<String>>> for RegexList {
-    fn validate(value: &Option<Vec<String>>) -> Result<()> {
+    fn validate(value: &Option<Vec<String>>) -> Result<(), apto::ConfigError> {
         let Some(value) = value.as_deref() else {
             return Ok(());
         };
 
         for regex_str in value {
-            regex::Regex::new(regex_str)
-                .map(|_| ())
-                .map_err(|error| anyhow::anyhow!("Invalid regular expression: {}", error))?;
+            regex::Regex::new(regex_str).map(|_| ()).map_err(|error| {
+                apto::ConfigError::InvalidValue(format!("Invalid regular expression: {}", error))
+            })?;
         }
 
         Ok(())
@@ -168,10 +184,7 @@ impl ConfigValidator<Option<Vec<String>>> for RegexList {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        FfmpegBitrate, PositiveU32, RegexList, ThumbnailGrid, ThumbnailSize, Url, VideoQuality,
-    };
-    use crate::config::types::ConfigValidator;
+    use super::*;
 
     #[test]
     fn video_quality_validator_enforces_range() {

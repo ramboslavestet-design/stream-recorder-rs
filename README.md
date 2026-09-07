@@ -137,7 +137,7 @@ The running recorder watches this file for changes. Most settings take effect th
 
 | Setting                            | Description                                                                                                 | Default |
 | ---------------------------------- | ----------------------------------------------------------------------------------------------------------- | ------- |
-| `monitors`                         | List of usernames to monitor                                                                                | `none`  |
+| `monitors`                         | List of platform_id:username to monitor                                                                     | `none`  |
 | `min_stream_duration`              | Minimum recorded duration required before post-processing. Accepts values like 5m, 90s, or 1h.              | `none`  |
 | `stream_reconnect_delay`           | How long to wait for a stream continuation before post-processing. Accepts values like 5m, 30s, or 1h.      | `none`  |
 | `stream_metadata_refresh_interval` | Refresh extracted stream metadata during active recordings. Accepts values like 30s, 5m, or 1h.             | `none`  |

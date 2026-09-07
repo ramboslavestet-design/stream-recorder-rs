@@ -127,7 +127,7 @@ pub async fn try_upload(
             eprintln!("{} preprocessing failed: {}", uploader.name(), e);
             let config = Config::get();
             send_program_error_webhook(
-                config.get_discord_webhook_url(),
+                config.get_discord_webhook_url().as_deref(),
                 "Upload preprocessing failed",
                 &format!(
                     "Preprocessing for upload to `{}` failed for file `{}`.\n\n{}",
@@ -218,7 +218,7 @@ async fn try_upload_single(
                         );
                         let config = Config::get();
                         send_program_error_webhook(
-                            config.get_discord_webhook_url(),
+                            config.get_discord_webhook_url().as_deref(),
                             "Upload failed after all retries",
                             &format!(
                                 "Upload to `{}` for file `{}` failed after {} retries.\n\n{}",
